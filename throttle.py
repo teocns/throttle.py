@@ -91,74 +91,54 @@ class LastTime:
                                 time.localtime(now))))
 
 
+
+
+
+
 # -----------------------------------------------------------------------------
 # throttled
 #
 # retries execution of a function
-def throttled(max_per_second, return_if_throttled=False):
+def throttled(max_per_second, return_if_throttled=False,*,key=None):
 
     min_interval = 1.0 / max_per_second
-    LT = LastTime('throttled')
-    
+    LT_cache = {}  # Cache for LastTime objects
 
     def decorate(func):
-        LT.acquire()
-        if LT.get_last_time_called() == 0:
-            LT.set_last_time_called()
-        LT.debug('DECORATE')
-        LT.release()
-
         @wraps(func)
         def throttled_function(*args, **kwargs):
 
-            logging.warning('___throttled f():[{!s}]: '
-                            'Max_per_Second:[{!s}]'
-                            .format(func.__name__, max_per_second))
+            k = key(*args, **kwargs) if key else 'throttled'
+            LT = LT_cache.get(k, None)
+            if LT is None:
+                LT = LastTime()
+                LT_cache[k] = LT
+
             try:
                 LT.acquire()
-                LT.add_cnt()
-                xfrom = time.time()
+                current_time = time.time()
 
-                elapsed = xfrom - LT.get_last_time_called()
+                if LT.get_last_time_called() == 0:
+                    LT.set_last_time_called()
+
+                elapsed = current_time - LT.get_last_time_called()
                 left_to_wait = min_interval - elapsed
-                logging.debug('___Rate f():[{!s}] '
-                              'cnt:[{!s}] '
-                              '\n\tlast_called:{!s} '
-                              '\n\t time now():{!s} '
-                              'elapsed:{:6.2f} '
-                              'min:{!s} '
-                              'to_wait:{:6.2f}'
-                              .format(func.__name__,
-                                      LT.get_cnt(),
-                                      time.strftime(
-                                            '%T',
-                                            time.localtime(
-                                                LT.get_last_time_called())),
-                                      time.strftime('%T',
-                                                    time.localtime(xfrom)),
-                                      elapsed,
-                                      min_interval,
-                                      left_to_wait))
+
                 if left_to_wait > 0:
                     if return_if_throttled:
                         return LT.release()
+
                     time.sleep(left_to_wait)
 
                 ret = func(*args, **kwargs)
-
-                LT.debug('OVER')
                 LT.set_last_time_called()
-                LT.debug('NEXT')
 
             except Exception as ex:
-                # CODING: To be changed once reportError is on a module
-                sys.stderr.write('+++000 '
-                                 'Exception on throttled_function: [{!s}]\n'
-                                 .format(ex))
-                sys.stderr.flush()
+                sys.stderr.write('Exception on throttled_function: {}\n'.format(ex))
                 raise
             finally:
                 LT.release()
+            
             return ret
 
         return throttled_function
